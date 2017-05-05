@@ -1,0 +1,27 @@
+#!/bin/bash
+
+parse_options() {
+    local options=() suboptions=()
+    for o ; do
+        if [[ $o == *:* ]]; then
+            suboptions+=( ${o%:*}: ${o#*:} )
+        else
+            options+=( $o )
+        fi
+    done
+    echo "${options[@]}" "${suboptions[@]}"
+}
+
+while read id cause options; do
+    case $cause in
+        break)                 echo --uninstalls-may-break ${id%::*}                                 ;;
+        changed_choices)       echo ${id%::*} $(parse_options $options) >> /etc/paludis/options.conf ;;
+        downgrade)             echo --permit-downgrade ${id%::*}                                     ;;
+        masked)                echo ${id%::*} >> /etc/paludis/package_unmask.conf                    ;;
+        not_best)              echo --permit-old-version ${id%::*}                                   ;;
+        remove_system_package) echo --uninstalls-may-break system                                    ;;
+        uninstall)             echo --permit-uninstall ${id%::*}                                     ;;
+        *)                     echo "unknown confirmation: $cause" >&2                               ;;
+    esac
+done
+

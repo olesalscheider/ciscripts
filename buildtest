@@ -1,0 +1,60 @@
+#!/bin/bash
+
+TMPFILE=$(mktemp -uq)
+
+rm -Rf /tmp/ciwork
+mkdir /tmp/ciwork
+pushd /tmp/ciwork
+
+echo "Repository URL: ${CI_REPOSITORY_URL}"
+echo "Branch: ${CI_COMMIT_REF_NAME}"
+echo "Commit hash: ${CI_COMMIT_SHA}"
+
+git clone ${CI_REPOSITORY_URL} ${REPO}
+pushd ${REPO}
+git checkout ${CI_COMMIT_REF_NAME}
+
+PKG=$(git diff-tree --no-commit-id --name-only -r ${CI_COMMIT_SHA} | grep -v "^$" | awk -F/ '$1~/packages/{print $2"/"$3}' | sort -u | xargs)
+if [[ -z ${PKG} ]]; then
+    echo "No package to build. No exlib recognised. Don't know what to do. Exiting."
+    exit 0
+fi
+
+popd
+popd
+
+cave sync
+cave sync ${REPO} -s local -r ${CI_COMMIT_SHA}
+
+rc=$?
+if [[ ${rc} -gt 0 ]]; then
+    echo "Sync failed!"
+    exit ${rc}
+fi
+
+cave resolve ${PKG} --display-resolution-program "cave print-resolution-required-confirmations" > ${TMPFILE}
+ARGS=$(handle_confirmations < ${TMPFILE})
+if [[ "${ARGS}" == *unknown\ confirmation:* ]]; then
+    echo "***** I FAILED! ***********************************************"
+    cat ${TMPFILE}
+    echo "*************** COMMITTING SUICIDE NOW! ***********************"
+    exit 1
+fi
+
+echo "ARGS: ${ARGS}"
+
+echo "**************************************************************"
+cave resolve -zx --skip-phase test --change-phases-for \!targets ${PKG} ${ARGS}
+
+rc=$?
+if [[ ${rc} -gt 0 ]]; then
+    echo "Build failed!"
+else
+    echo "**************************************************************"
+    echo "Dependencies I believe to have found (excluding system):"
+    /usr/local/bin/mscan2.rb -i system ${PKG/::*} 2>&1
+    echo "**************************************************************"
+fi
+
+exit ${rc}
+
